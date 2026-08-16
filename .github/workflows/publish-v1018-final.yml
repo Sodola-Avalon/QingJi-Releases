@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   publish:
@@ -15,34 +16,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch exact public v1.0.17 base
+      - name: Confirm release preflight succeeded
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download v1.0.17 -p 'QingJi-v1.0.17.apk'
-          echo 'd03b0521acbc4fa7eaca1dfd988e22312c3018774646a98ad327367bf6d82310  QingJi-v1.0.17.apk' | sha256sum -c -
+          test "$(gh run view 31965478366 --json conclusion --jq .conclusion)" = success
 
-      - name: Reconstruct exact signed v1.0.18
+      - name: Download exact preflight-approved APK
+        uses: actions/download-artifact@v4
+        with:
+          name: qingji-v1.0.18-release-preflight
+          run-id: 31965478366
+          github-token: ${{ github.token }}
+          path: approved
+
+      - name: Verify exact approved APK identity
         run: |
           set -euo pipefail
-          test -f .release/v1.0.18.patch.zst.b64
-          echo '77748f0aaaad4fc079f3271ccb68632dee1f8fb2ed8923f72f74b19055ea85e3  .release/v1.0.18.patch.zst.b64' | sha256sum -c -
-          base64 -d .release/v1.0.18.patch.zst.b64 > v1.0.17-to-v1.0.18.patch.zst
-          echo '11c240e7d2f29efea3879a8eb8eb801f75fdc9f9dc4dd379679b12a01a46ca40  v1.0.17-to-v1.0.18.patch.zst' | sha256sum -c -
-          zstd --patch-from=QingJi-v1.0.17.apk -d -f v1.0.17-to-v1.0.18.patch.zst -o QingJi-v1.0.18.apk
+          cp approved/QingJi-v1.0.18.apk QingJi-v1.0.18.apk
           echo '5090167f428390cc791c36b04ac837c82b7835c6d480dfb74a72bb61f1c60896  QingJi-v1.0.18.apk' | sha256sum -c -
           printf '%s  %s\n' '5090167f428390cc791c36b04ac837c82b7835c6d480dfb74a72bb61f1c60896' 'QingJi-v1.0.18.apk' > QingJi-v1.0.18.apk.sha256
 
-      - name: Verify original QingJi signer
+      - name: Verify version and original QingJi signer again
         run: |
           set -euo pipefail
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort | tail -1)"
-          test -x "$APKSIGNER"
-          "$APKSIGNER" verify --verbose --print-certs QingJi-v1.0.18.apk | tee apksigner-v1018.txt
-          grep -q 'Verified using v2 scheme.*true' apksigner-v1018.txt
-          grep -q 'Verified using v3 scheme.*true' apksigner-v1018.txt
-          grep -q 'Signer #1 certificate SHA-256 digest: 09826dcef6717e502e1d09f498e9733fe5b6773f16c69a82bf7cea7ecf092e33' apksigner-v1018.txt
+          AAPT2="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort | tail -1)"
+          test -x "$APKSIGNER"; test -x "$AAPT2"
+          "$APKSIGNER" verify --verbose --print-certs QingJi-v1.0.18.apk | tee apksigner-v1018-release.txt
+          grep -q 'Verified using v2 scheme.*true' apksigner-v1018-release.txt
+          grep -q 'Verified using v3 scheme.*true' apksigner-v1018-release.txt
+          grep -q 'certificate SHA-256 digest: 09826dcef6717e502e1d09f498e9733fe5b6773f16c69a82bf7cea7ecf092e33' apksigner-v1018-release.txt
+          "$AAPT2" dump badging QingJi-v1.0.18.apk | tee badging-v1018-release.txt
+          grep -q "package: name='com.qinghao.qingji' versionCode='21' versionName='1.0.18'" badging-v1018-release.txt
 
       - name: Write release notes
         run: |
