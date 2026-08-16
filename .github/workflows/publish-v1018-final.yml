@@ -1,0 +1,85 @@
+name: Publish verified QingJi v1.0.18
+
+on:
+  push:
+    paths:
+      - '.release/trigger-v1.0.18-final'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch exact public v1.0.17 base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download v1.0.17 -p 'QingJi-v1.0.17.apk'
+          echo 'd03b0521acbc4fa7eaca1dfd988e22312c3018774646a98ad327367bf6d82310  QingJi-v1.0.17.apk' | sha256sum -c -
+
+      - name: Reconstruct exact signed v1.0.18
+        run: |
+          set -euo pipefail
+          test -f .release/v1.0.18.patch.zst.b64
+          echo '77748f0aaaad4fc079f3271ccb68632dee1f8fb2ed8923f72f74b19055ea85e3  .release/v1.0.18.patch.zst.b64' | sha256sum -c -
+          base64 -d .release/v1.0.18.patch.zst.b64 > v1.0.17-to-v1.0.18.patch.zst
+          echo '11c240e7d2f29efea3879a8eb8eb801f75fdc9f9dc4dd379679b12a01a46ca40  v1.0.17-to-v1.0.18.patch.zst' | sha256sum -c -
+          zstd --patch-from=QingJi-v1.0.17.apk -d -f v1.0.17-to-v1.0.18.patch.zst -o QingJi-v1.0.18.apk
+          echo '5090167f428390cc791c36b04ac837c82b7835c6d480dfb74a72bb61f1c60896  QingJi-v1.0.18.apk' | sha256sum -c -
+          printf '%s  %s\n' '5090167f428390cc791c36b04ac837c82b7835c6d480dfb74a72bb61f1c60896' 'QingJi-v1.0.18.apk' > QingJi-v1.0.18.apk.sha256
+
+      - name: Verify original QingJi signer
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort | tail -1)"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs QingJi-v1.0.18.apk | tee apksigner-v1018.txt
+          grep -q 'Verified using v2 scheme.*true' apksigner-v1018.txt
+          grep -q 'Verified using v3 scheme.*true' apksigner-v1018.txt
+          grep -q 'Signer #1 certificate SHA-256 digest: 09826dcef6717e502e1d09f498e9733fe5b6773f16c69a82bf7cea7ecf092e33' apksigner-v1018.txt
+
+      - name: Write release notes
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## 清记 V1.0.18
+
+          本版本集中修复纵向翻页在部分 HyperOS 真机上的顶部坐标错位 / 穿模问题，并调整桌面图标视觉比例。
+
+          ### 修复
+          - 纵向翻页提示改为“上一页 / 下一页”两个独立固定布局槽位，不再在手势过程中依赖 Header / FAB 的运行时坐标去重算 margin。
+          - 提示位置改由布局与 Window Insets 决定；手势过程只改变透明度、位移和进度，降低不同系统布局时序造成的漂移。
+          - 顶部材质层重新组织为“清晰任务内容退场 + 模糊内容接管”，并固定层级为：任务内容 < 翻页反馈 < 玻璃材质 < Header < FAB，减少任务卡穿入顶部控件后的清晰残影。
+          - 保持下拉 = 上一天、上拉 = 下一天；横向翻页仍不显示文字提示。
+
+          ### 图标
+          - 仅将桌面图标中央蓝色前景缩小约 10%。
+          - 白色底板 / 外轮廓尺寸保持不变。
+
+          ### 兼容性
+          - 保留 V1.0.17 的 GitHub 手动检查更新、SHA-256 下载校验和系统安装器更新链路。
+          - 保留重复任务、提醒调度、Widget、长按排序与复制上一次任务等既有行为。
+
+          ### 完整性
+          APK SHA-256：`5090167f428390cc791c36b04ac837c82b7835c6d480dfb74a72bb61f1c60896`
+          EOF
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.0.18 >/dev/null 2>&1; then
+            echo 'v1.0.18 already exists; refusing to overwrite.'
+            exit 1
+          fi
+          gh release create v1.0.18 \
+            QingJi-v1.0.18.apk \
+            QingJi-v1.0.18.apk.sha256 \
+            --title '清记 V1.0.18' \
+            --notes-file release-notes.md
