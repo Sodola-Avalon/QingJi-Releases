@@ -1,0 +1,97 @@
+name: QingJi v1.0.18 release reconstruction preflight
+
+on:
+  push:
+    paths:
+      - '.release/preflight-v1.0.18'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact unsigned production artifact
+        run: |
+          set -euo pipefail
+          URL="$(cat .release/preflight-v1.0.18)"
+          test -n "$URL"
+          curl --fail --location --retry 3 --connect-timeout 20 \
+            -o qingji-v1.0.18-production-unsigned.zip "$URL"
+          echo '6d86fa0b0f992a852d4d884d188406b1880091e6097a2e2ca3d7591dcf2038a9  qingji-v1.0.18-production-unsigned.zip' | sha256sum -c -
+          unzip -q qingji-v1.0.18-production-unsigned.zip -d production
+          echo '2917eda8d99a88179d261eb23f0b160435c971fd877f118ef7008c087035fa09  production/QingJi-v1.0.18-aligned-unsigned.apk' | sha256sum -c -
+
+      - name: Verify and decode original-signature delta
+        run: |
+          set -euo pipefail
+          cat .release/v1.0.18.sigdelta.zst.b64.* > sigdelta.zst.b64
+          echo '12f4a8e40de501c83a2bcee635f9a5b0097f71e0ee4145351a21b3d52695389c  sigdelta.zst.b64' | sha256sum -c -
+          base64 -d sigdelta.zst.b64 > sigdelta.qjd2.zst
+          echo '13336242600f8ec2bd6bc8db82ebfe2c61a511c847bf97f68f0c02803c622108  sigdelta.qjd2.zst' | sha256sum -c -
+          zstd -d -f sigdelta.qjd2.zst -o sigdelta.qjd2
+          echo 'eae2d1b9cc1205cb2aab2582a91e5da1fe49b2209608d6ed316d6b6257010aef  sigdelta.qjd2' | sha256sum -c -
+
+      - name: Reconstruct exact signed v1.0.18
+        run: |
+          set -euo pipefail
+          cat > apply_qjd2.py <<'PY'
+          from pathlib import Path
+          def rv(b,i):
+              n=0; s=0
+              while True:
+                  x=b[i]; i+=1; n |= (x & 0x7f) << s
+                  if not x & 0x80: return n,i
+                  s += 7
+                  if s > 63: raise SystemExit('varint too long')
+          old=Path('production/QingJi-v1.0.18-aligned-unsigned.apk').read_bytes()
+          d=Path('sigdelta.qjd2').read_bytes()
+          if d[:4] != b'QJD2': raise SystemExit('bad QJD2 magic')
+          i=4; olen,i=rv(d,i); nlen,i=rv(d,i); nops,i=rv(d,i)
+          if len(old) != olen: raise SystemExit('old length mismatch')
+          out=bytearray()
+          for _ in range(nops):
+              t=d[i]; i+=1
+              if t == 0:
+                  ln,i=rv(d,i); out += d[i:i+ln]; i += ln
+              elif t == 1:
+                  off,i=rv(d,i); ln,i=rv(d,i)
+                  if off+ln > len(old): raise SystemExit('copy outside old')
+                  out += old[off:off+ln]
+              else: raise SystemExit('bad op')
+          if i != len(d): raise SystemExit('trailing delta bytes')
+          if len(out) != nlen: raise SystemExit('new length mismatch')
+          Path('QingJi-v1.0.18.apk').write_bytes(out)
+          print(f'QJD2_APPLY_PASS old={olen} new={nlen} ops={nops}')
+          PY
+          python3 apply_qjd2.py
+          echo '5090167f428390cc791c36b04ac837c82b7835c6d480dfb74a72bb61f1c60896  QingJi-v1.0.18.apk' | sha256sum -c -
+
+      - name: Verify version and original QingJi signer
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort | tail -1)"
+          AAPT2="$(find "$ANDROID_HOME/build-tools" -type f -name aapt2 | sort | tail -1)"
+          test -x "$APKSIGNER"; test -x "$AAPT2"
+          "$APKSIGNER" verify --verbose --print-certs QingJi-v1.0.18.apk | tee apksigner-v1018.txt
+          grep -q 'Verified using v2 scheme.*true' apksigner-v1018.txt
+          grep -q 'Verified using v3 scheme.*true' apksigner-v1018.txt
+          grep -q 'Signer #1 certificate SHA-256 digest: 09826dcef6717e502e1d09f498e9733fe5b6773f16c69a82bf7cea7ecf092e33' apksigner-v1018.txt
+          "$AAPT2" dump badging QingJi-v1.0.18.apk | tee badging.txt
+          grep -q "package: name='com.qinghao.qingji' versionCode='21' versionName='1.0.18'" badging.txt
+          echo 'V1018_RELEASE_PREFLIGHT_PASS'
+
+      - name: Upload preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: qingji-v1.0.18-release-preflight
+          path: |
+            QingJi-v1.0.18.apk
+            apksigner-v1018.txt
+            badging.txt
+          retention-days: 3
