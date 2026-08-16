@@ -23,8 +23,11 @@
 
 客户端只接受符合上述命名规则的 APK 资产，并校验版本号后再提示安装。
 
-## 当前状态
+## 当前正式版本
 
-V1.0.16 为接入公开在线更新源之前的最后一个版本。
+- 最新正式版：`V1.0.17`
+- Release：`https://github.com/Sodola-Avalon/QingJi-Releases/releases/tag/v1.0.17`
+- APK SHA-256：`d03b0521acbc4fa7eaca1dfd988e22312c3018774646a98ad327367bf6d82310`
+- V1.0.17 已正式接入本仓库作为客户端“检查更新”来源，并完成发布后真实线上反向验证。
 
-下一版 V1.0.17 将正式接入本仓库作为“检查更新”来源。
+下一开发目标为 `V1.0.18`。开发/测试/私有恢复资料继续存放于 Private `Sodola-Avalon/QingJi` 与 `Sodola-Avalon/qingji-android-test-lab`，不要提交到本公开发布仓库。
