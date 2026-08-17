@@ -51,6 +51,7 @@ jobs:
           rm -rf release-work
           mkdir -p release-work/base release-work/out
           cat .release/v1.0.19-r3.delta.b64.00 \
+              .release/v1.0.19-r3.delta.b64.00b \
               .release/v1.0.19-r3.delta.b64.01 \
               .release/v1.0.19-r3.delta.b64.02 \
               .release/v1.0.19-r3.delta.b64.03 \
