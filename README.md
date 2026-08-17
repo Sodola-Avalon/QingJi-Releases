@@ -25,14 +25,15 @@
 
 ## 当前正式版本
 
-- 最新正式版：`V1.0.18`
-- Release：`v1.0.18`
-- versionCode：`21`
-- APK：`QingJi-v1.0.18.apk`
-- APK 大小：`326301` bytes
-- APK SHA-256：`5090167f428390cc791c36b04ac837c82b7835c6d480dfb74a72bb61f1c60896`
-- 配套 SHA 文件：`QingJi-v1.0.18.apk.sha256`
+- 最新正式版：`V1.0.19`
+- Release：`v1.0.19`
+- versionCode：`24`
+- APK：`QingJi-v1.0.19.apk`
+- APK 大小：`322010` bytes
+- APK SHA-256：`93519c21cea293d6ecab446a3050a5ed7b4724bb61341316fab0e82fa3d84d9d`
+- 配套 SHA 文件：`QingJi-v1.0.19.apk.sha256`
+- 原 QingJi signer SHA-256：`09826dcef6717e502e1d09f498e9733fe5b6773f16c69a82bf7cea7ecf092e33`
 
-V1.0.18 发布前已再次验证原 QingJi signer、APK Signature Scheme v2/v3、版本号和 exact APK SHA；发布后又完成正式 V1.0.17 客户端的真实线上升级链路验证，包括发现 V1.0.18、下载 APK/.sha256、SHA 校验、未知来源授权、Android 系统安装器、原地升级和数据保留。
+V1.0.19 使用 HyperOS 真机验收通过的 V1.0.19-r3 作为 exact 正式产物。发布门禁重新从公开 V1.0.18 基底重建该 APK，并在创建 Release 前硬校验二进制增量、最终 APK SHA-256/文件大小、versionCode/versionName、APK Signature Scheme v2/v3 和原 QingJi signer；发布后又将公开资产重新下载并再次核对 exact SHA。
 
 开发、测试和私有恢复资料继续存放于 Private `Sodola-Avalon/QingJi` 与 `Sodola-Avalon/qingji-android-test-lab`，不要提交到本公开发布仓库。
