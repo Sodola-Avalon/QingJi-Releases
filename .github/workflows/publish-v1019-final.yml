@@ -1,0 +1,143 @@
+name: Publish QingJi v1.0.19 final
+
+on:
+  push:
+    paths:
+      - '.release/trigger-v1.0.19-final'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  OLD_TAG: v1.0.18
+  OLD_APK_SHA256: 5090167f428390cc791c36b04ac837c82b7835c6d480dfb74a72bb61f1c60896
+  DELTA_SHA256: 0245f8e64d6337619694499929bbd4e3b180b2fb6ef9018671ca4599b4183783
+  FINAL_APK_SHA256: 93519c21cea293d6ecab446a3050a5ed7b4724bb61341316fab0e82fa3d84d9d
+  FINAL_APK_SIZE: '322010'
+  SIGNER_CERT_SHA256: 09826dcef6717e502e1d09f498e9733fe5b6773f16c69a82bf7cea7ecf092e33
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to overwrite an existing v1.0.19 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.0.19 >/dev/null 2>&1; then
+            echo 'v1.0.19 already exists; refusing to overwrite.' >&2
+            exit 1
+          fi
+
+      - name: Install release verification tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort | tail -1)"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --install 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+          echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
+
+      - name: Reassemble and verify release transport delta
+        run: |
+          set -euo pipefail
+          rm -rf release-work
+          mkdir -p release-work/base release-work/out
+          cat .release/v1.0.19-r3.delta.b64.00 \
+              .release/v1.0.19-r3.delta.b64.01 \
+              .release/v1.0.19-r3.delta.b64.02 \
+              .release/v1.0.19-r3.delta.b64.03 \
+              .release/v1.0.19-r3.delta.b64.04 \
+              .release/v1.0.19-r3.delta.b64.05 \
+              .release/v1.0.19-r3.delta.b64.06 \
+              .release/v1.0.19-r3.delta.b64.07 \
+            | tr -d '\r\n' | base64 -d > release-work/v1019.delta.zst
+          echo "$DELTA_SHA256  release-work/v1019.delta.zst" | sha256sum -c -
+
+      - name: Download exact public v1.0.18 base APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$OLD_TAG" -p 'QingJi-v1.0.18.apk' -D release-work/base
+          echo "$OLD_APK_SHA256  release-work/base/QingJi-v1.0.18.apk" | sha256sum -c -
+
+      - name: Reconstruct exact signed v1.0.19-r3 APK
+        run: |
+          set -euo pipefail
+          zstd -d --patch-from=release-work/base/QingJi-v1.0.18.apk \
+            release-work/v1019.delta.zst \
+            -o release-work/out/QingJi-v1.0.19.apk
+          echo "$FINAL_APK_SHA256  release-work/out/QingJi-v1.0.19.apk" | sha256sum -c -
+          test "$(stat -c '%s' release-work/out/QingJi-v1.0.19.apk)" = "$FINAL_APK_SIZE"
+
+      - name: Verify version, APK signature schemes, and original signer
+        run: |
+          set -euo pipefail
+          APK='release-work/out/QingJi-v1.0.19.apk'
+          aapt2 dump badging "$APK" | tee release-work/out/badging.txt
+          grep -F "package: name='com.qinghao.qingji' versionCode='24' versionName='1.0.19'" release-work/out/badging.txt
+
+          apksigner verify --verbose --print-certs "$APK" | tee release-work/out/apksigner.txt
+          grep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' release-work/out/apksigner.txt
+          grep -F 'Verified using v3 scheme (APK Signature Scheme v3): true' release-work/out/apksigner.txt
+          ACTUAL_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' release-work/out/apksigner.txt | head -1 | tr '[:upper:]' '[:lower:]')"
+          test "$ACTUAL_CERT" = "$SIGNER_CERT_SHA256"
+          echo "signer_sha256=$ACTUAL_CERT"
+
+      - name: Generate checksum and release notes
+        run: |
+          set -euo pipefail
+          cd release-work/out
+          printf '%s  %s\n' "$FINAL_APK_SHA256" 'QingJi-v1.0.19.apk' > QingJi-v1.0.19.apk.sha256
+          cat > release-notes.md <<'EOF'
+          ## 清记 V1.0.19
+
+          本次版本以 HyperOS 真机验收通过的 V1.0.19-r3 为最终正式产物。
+
+          ### 修复
+          - 修复应用更新安装成功后，再次进入设置页会重复拉起 Android 系统安装器的问题；已安装目标版本时会自动清理 pending 更新状态与缓存 APK。
+          - 结构性修复纵向翻页提示在 HyperOS 上侵入顶部日期/设置按钮区域或贴近底部手势区域的问题。
+          - 优化纵向翻页的视觉节奏：正常状态缩小顶部多余留白；下拉时仅在形成安全通道后显示“上一天”提示；上拉提示下移至更自然的位置，同时与 FAB 保持安全距离。
+          - 顶部玻璃渐隐区域同步收紧，避免为翻页提示长期预留过大的空白。
+
+          ### 验证
+          - HyperOS 真机：V1.0.19-r3 已人工验收通过。
+          - Android API 34 / API 35 几何门禁：均通过。
+          - 原清记签名保持不变，APK Signature Scheme v2 / v3 均通过。
+
+          ### SHA-256
+          `93519c21cea293d6ecab446a3050a5ed7b4724bb61341316fab0e82fa3d84d9d  QingJi-v1.0.19.apk`
+          EOF
+
+      - name: Publish immutable v1.0.19 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd release-work/out
+          gh release create v1.0.19 \
+            QingJi-v1.0.19.apk \
+            QingJi-v1.0.19.apk.sha256 \
+            --title '清记 V1.0.19' \
+            --notes-file release-notes.md
+
+      - name: Verify published assets from GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf release-work/published
+          mkdir -p release-work/published
+          gh release download v1.0.19 -p 'QingJi-v1.0.19.apk' -p 'QingJi-v1.0.19.apk.sha256' -D release-work/published
+          echo "$FINAL_APK_SHA256  release-work/published/QingJi-v1.0.19.apk" | sha256sum -c -
+          grep -F "$FINAL_APK_SHA256  QingJi-v1.0.19.apk" release-work/published/QingJi-v1.0.19.apk.sha256
+          test "$(stat -c '%s' release-work/published/QingJi-v1.0.19.apk)" = "$FINAL_APK_SIZE"
+          echo 'V1019_RELEASE_VERIFIED'
